@@ -188,29 +188,33 @@ static int flash(void *arg){
    while(!kthread_should_stop()){           // Returns true when kthread_stop() is called
       set_current_state(TASK_RUNNING);
       if (LEDMode==BURST){
-         /**
          ledOn = true;
          gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
          gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
          gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+         set_current_state(TASK_RUNNING);
          msleep(blinkPeriod/2); 
          ledOn = false;
-         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn of the LED
-         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn of the LED
-         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn of the LED*/
+         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+         set_current_state(TASK_RUNNING);
       }
       else if (LEDMode==ON){
          ledOn = true;
-         //gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
-         //gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
-         //gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+         set_current_state(TASK_RUNNING);
       }	
       else {
-         ledOn = false;}
-      gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
-      gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
-      gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
-      set_current_state(TASK_RUNNING);
+         ledOn = false;
+         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+         set_current_state(TASK_RUNNING);
+      }
+
       msleep(blinkPeriod/2);                // millisecond sleep for half of the period
    }
    printk(KERN_INFO "EBB LED: Thread has run to completion \n");
