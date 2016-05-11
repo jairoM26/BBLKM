@@ -188,14 +188,24 @@ static int flash(void *arg){
    while(!kthread_should_stop()){           // Returns true when kthread_stop() is called
       set_current_state(TASK_RUNNING);
       if (LEDMode==BURST){
-	ledOn != ledOn;
+         ledOn = true;
+         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+         msleep(blinkPeriod/2); 
+         ledOn = false;
+         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn of the LED
+         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn of the LED
+         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn of the LED
       }
       else if (LEDMode==ON){
-	ledOn = true;
+         ledOn = true;
+         gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
+         gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
       }	
-      else ledOn = false;
-      gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn off the LED
-      gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn off the LED
+      else {
+         ledOn = false;}
       set_current_state(TASK_RUNNING);
       msleep(blinkPeriod/2);                // millisecond sleep for half of the period
    }
@@ -234,6 +244,17 @@ static int __init ebbLED_init(void){
    gpio_export(gpioLED1, false);  // causes gpio49 to appear in /sys/class/gpio
                                  // the second argument prevents the direction from being changed
 
+   gpio_request(gpioLED2, "sysfs");          // gpioLED2 is 138 by default, request it
+   gpio_direction_output(gpioLED2, ledOn);   // Set the gpio to be in output mode and turn on
+   gpio_export(gpioLED2, false);  // causes gpio49 to appear in /sys/class/gpio
+                                 // the second argument prevents the direction from being changed
+
+
+   gpio_request(gpioLED3, "sysfs");          // gpioLED3 is 137 by default, request it
+   gpio_direction_output(gpioLED3, ledOn);   // Set the gpio to be in output mode and turn on
+   gpio_export(gpioLED3, false);  // causes gpio49 to appear in /sys/class/gpio
+                                 // the second argument prevents the direction from being changed
+
 
    task = kthread_run(flash, NULL, "LED_flash_thread");  // Start the LED flashing thread
    if(IS_ERR(task)){                                     // Kthread name is LED_flash_thread
@@ -257,6 +278,10 @@ static void __exit ebbLED_exit(void){
    gpio_set_value(gpioLED2, 0);              // Turn the LED2 off, indicates device was unloaded
    gpio_unexport(gpioLED2);                  // Unexport the Button GPIO
    gpio_free(gpioLED2);                      // Free the LED2 GPIO
+
+   gpio_set_value(gpioLED3, 0);              // Turn the LED3 off, indicates device was unloaded
+   gpio_unexport(gpioLED3);                  // Unexport the Button GPIO
+   gpio_free(gpioLED3);                      // Free the LED3 GPIO
 
 
    printk(KERN_INFO "EBB LED: Goodbye from the EBB LED LKM!\n");
