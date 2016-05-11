@@ -1,0 +1,7 @@
+1- make
+2- ls
+3- ls -l name.ko
+4- sudo insmod name.ko
+5- lsmod
+6- modinfo name.ko
+7- sudo rmmod name.ko

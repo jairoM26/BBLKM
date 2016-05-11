@@ -1,0 +1,11 @@
+#insmod BBLKM --- inicializar el modulo de kernel
+
+1#dev/LEDMode --- si es default (0), los 3s leds se enciendes y se apagan al estripar el boton
+
+2#dev/LedStatus ---- si LEDMode es default y se estripa el boton led statud 1, alreves 0
+
+3#dev/ButtonStatus ---- cuenta la cant de veces se estripa el boton
+
+4#dev/burstRep ----- cambia el número de repeticiones que se repite el burst
+
+5#dev/blinkPeriod ---- tiempo en el que el led va a estar encendido
