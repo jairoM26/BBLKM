@@ -62,10 +62,10 @@ module_param(gpioLED1, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be rea
 MODULE_PARM_DESC(gpioLED1, " GPIO LED number (default=139)");     ///< parameter description
 static unsigned int gpioLED2 = 137;           ///< Default GPIO for the LED is 137
 module_param(gpioLED2, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(gpioLED2, " GPIO LED number (default=137)");     ///< parameter description
+MODULE_PARM_DESC(gpioLED2, " GPIO LED number (default=138)");     ///< parameter description
 static unsigned int gpioLED3 = 138;           ///< Default GPIO for the LED is 138
 module_param(gpioLED3, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(gpioLED3, " GPIO LED number (default=138)");     ///< parameter description
+MODULE_PARM_DESC(gpioLED3, " GPIO LED number (default=137)");     ///< parameter description
 
 static unsigned int burstRep = 1;     ///< The blink period in ms
 module_param(burstRep, uint, S_IRUGO);   ///< Param desc. S_IRUGO can be read/not changed
@@ -232,8 +232,9 @@ static int __init ebbLED_init(void){
    int result = 0;
 
    printk(KERN_INFO "EBB LED: Initializing the EBB LED LKM\n");
-   //sprintf(ledName, "led%d", gpioLED1);      // Create the gpio115 name for /sys/ebb/led49
-   sprintf("dev", "BBLKM%d", 0);      // Create the gpio115 name for /sys/ebb/led49
+   sprintf(ledName, "led%d", gpioLED1);      // Create the gpio115 name for /sys/ebb/led49
+   sprintf(ledName, "led%d", gpioLED2);      // Create the gpio115 name for /sys/ebb/led49
+   sprintf(ledName, "led%d", gpioLED3);      // Create the gpio115 name for /sys/ebb/led49
 
    ebb_kobj = kobject_create_and_add("ebb", kernel_kobj->parent); // kernel_kobj points to /sys/kernel
    if(!ebb_kobj){
