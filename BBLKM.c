@@ -334,6 +334,29 @@ static int flash(void *arg){
    return 0;
 }
 
+static void buttonInterruption(void){
+   task = kthread_run(flash, NULL, "LED_flash_thread");  // Start the LED flashing thread
+}
+
+/** @brief The GPIO IRQ Handler function
+ *  This function is a custom interrupt handler that is attached to the GPIO above. The same interrupt
+ *  handler cannot be invoked concurrently as the interrupt line is masked out until the function is complete.
+ *  This function is static as it should not be invoked directly from outside of this file.
+ *  @param irq    the IRQ number that is associated with the GPIO -- useful for logging.
+ *  @param dev_id the *dev_id that is provided -- can be used to identify which device caused the interrupt
+ *  Not used in this example as NULL is passed.
+ *  @param regs   h/w specific register values -- only really ever used for debugging.
+ *  return returns IRQ_HANDLED if successful -- should return IRQ_NONE otherwise.
+ */
+static irq_handler_t BBLKMgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
+
+   task = kthread_run(buttonInterruption, NULL, "LED_flash_thread");  // Start the LED flashing thread
+
+   numberPresses++;                         // Global counter, will be outputted when the module is unloaded
+   return (irq_handler_t) IRQ_HANDLED;      // Announce that the IRQ has been handled correctly
+}
+
+
 /** @brief The LKM initialization function
  *  The static keyword restricts the visibility of the function to within this C file. The __init
  *  macro means that for a built-in driver (not a LKM) the function is only used at initialization
@@ -438,27 +461,6 @@ static void __exit BBLKM_exit(void){
 }
 
 
-/** @brief The GPIO IRQ Handler function
- *  This function is a custom interrupt handler that is attached to the GPIO above. The same interrupt
- *  handler cannot be invoked concurrently as the interrupt line is masked out until the function is complete.
- *  This function is static as it should not be invoked directly from outside of this file.
- *  @param irq    the IRQ number that is associated with the GPIO -- useful for logging.
- *  @param dev_id the *dev_id that is provided -- can be used to identify which device caused the interrupt
- *  Not used in this example as NULL is passed.
- *  @param regs   h/w specific register values -- only really ever used for debugging.
- *  return returns IRQ_HANDLED if successful -- should return IRQ_NONE otherwise.
- */
-static irq_handler_t BBLKMgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
-
-   task = kthread_run(buttonInterruption, NULL, "LED_flash_thread");  // Start the LED flashing thread
-
-   numberPresses++;                         // Global counter, will be outputted when the module is unloaded
-   return (irq_handler_t) IRQ_HANDLED;      // Announce that the IRQ has been handled correctly
-}
-
-static void buttonInterruption(void){
-   task = kthread_run(flash, NULL, "LED_flash_thread");  // Start the LED flashing thread
-}
 
 /// This next calls are  mandatory -- they identify the initialization function
 /// and the cleanup function (as above).
