@@ -214,7 +214,7 @@ static int flash(void *arg){
          gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
          set_current_state(TASK_RUNNING);
       }
-
+      set_current_state(TASK_RUNNING);
       msleep(blinkPeriod/2);                // millisecond sleep for half of the period
    }
    printk(KERN_INFO "EBB LED: Thread has run to completion \n");
