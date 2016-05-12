@@ -188,17 +188,21 @@ static int flash(void *arg){
    while(!kthread_should_stop()){           // Returns true when kthread_stop() is called
       set_current_state(TASK_RUNNING);
       if (LEDMode==BURST){
-         gpio_set_value(gpioLED1, true);       // Use the LED state to light/turn on the LED
-         gpio_set_value(gpioLED1, false);       // Use the LED state to light/turn of the LED
-         set_current_state(TASK_RUNNING);
-         msleep(blinkPeriod/2);
-         gpio_set_value(gpioLED2, true);       // Use the LED state to light/turn on the LED
-         gpio_set_value(gpioLED2, false);       // Use the LED state to light/turn of the LED
-         set_current_state(TASK_RUNNING);
-         msleep(blinkPeriod/2);
-         gpio_set_value(gpioLED3, true);       // Use the LED state to light/turn on the LED
-         gpio_set_value(gpioLED3, false);       // Use the LED state to light/turn of the LED
-         set_current_state(TASK_RUNNING);
+         int tmp = burstRep;
+         while(tmp!=0){
+            gpio_set_value(gpioLED1, true);       // Use the LED state to light/turn on the LED
+            gpio_set_value(gpioLED1, false);       // Use the LED state to light/turn of the LED
+            set_current_state(TASK_RUNNING);
+            msleep(blinkPeriod);
+            gpio_set_value(gpioLED2, true);       // Use the LED state to light/turn on the LED
+            gpio_set_value(gpioLED2, false);       // Use the LED state to light/turn of the LED
+            set_current_state(TASK_RUNNING);
+            msleep(blinkPeriod);
+            gpio_set_value(gpioLED3, true);       // Use the LED state to light/turn on the LED
+            gpio_set_value(gpioLED3, false);       // Use the LED state to light/turn of the LED
+            set_current_state(TASK_RUNNING);
+            tmp = tmp - 1;
+         }
       }
       else if (LEDMode==ON){
          ledOn = true;
