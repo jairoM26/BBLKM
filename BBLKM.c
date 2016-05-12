@@ -9,7 +9,6 @@
  * The sysfs entry appears at /sys/dev
  * @see http://www.derekmolloy.ie/ for reference
 */
-*/
 
 /**
 Including libraries
@@ -77,9 +76,6 @@ static unsigned int gpioLED3 = 137;           ///< Default GPIO for the LED is 1
  *@brief Set the value of the gpio, in the beagleboard the pin number is 9
 */
 static unsigned int gpioButton = 136;   ///< hard coding the button gpio for this example to P9_9 (GPIO136)
-
-static unsigned int irqNumber;          ///< Used to share the IRQ number within this file
-static unsigned int numberPresses = 0;  ///< For information, store the number of button presses
 
 static int    irqNumber;                    ///< Used to share the IRQ number within this file
 static int    numberPresses = 0;            ///< For information, store the number of button presses
