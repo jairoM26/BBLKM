@@ -201,6 +201,7 @@ static int flash(void *arg){
             gpio_set_value(gpioLED3, true);       // Use the LED state to light/turn on the LED
             gpio_set_value(gpioLED3, false);       // Use the LED state to light/turn of the LED
             set_current_state(TASK_RUNNING);
+            printk(KERN_INFO tmp);
             tmp = tmp - 1;
          }
       }
