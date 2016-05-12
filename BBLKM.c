@@ -232,7 +232,8 @@ static int __init ebbLED_init(void){
    int result = 0;
 
    printk(KERN_INFO "EBB LED: Initializing the EBB LED LKM\n");
-   sprintf(ledName, "led%d", gpioLED1);      // Create the gpio115 name for /sys/ebb/led49
+   //sprintf(ledName, "led%d", gpioLED1);      // Create the gpio115 name for /sys/ebb/led49
+   sprintf("dev", "BBLKM%d", 0);      // Create the gpio115 name for /sys/ebb/led49
 
    ebb_kobj = kobject_create_and_add("ebb", kernel_kobj->parent); // kernel_kobj points to /sys/kernel
    if(!ebb_kobj){
