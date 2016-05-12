@@ -67,6 +67,10 @@ static unsigned int gpioLED3 = 138;           ///< Default GPIO for the LED is 1
 module_param(gpioLED3, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be read/not changed
 MODULE_PARM_DESC(gpioLED3, " GPIO LED number (default=137)");     ///< parameter description
 
+static unsigned int gpioButton = 136;   ///< hard coding the button gpio for this example to P9_9 (GPIO136)
+static unsigned int irqNumber;          ///< Used to share the IRQ number within this file
+static unsigned int numberPresses = 0;  ///< For information, store the number of button presses
+
 static unsigned int burstRep = 1;     ///< The blink period in ms
 module_param(burstRep, uint, S_IRUGO);   ///< Param desc. S_IRUGO can be read/not changed
 MODULE_PARM_DESC(burstRep, " Burst is repite n times");
@@ -150,6 +154,9 @@ static ssize_t burstRep_store(struct kobject *kobj, struct kobj_attribute *attr,
 static struct kobj_attribute period_attr = __ATTR(blinkPeriod, 0666, period_show, period_store);
 static struct kobj_attribute burst_attr = __ATTR(burstRep, 0666, burstRep_show, burstRep_store);
 static struct kobj_attribute mode_attr = __ATTR(LEDMode, 0666, mode_show, mode_store);
+static struct kobj_attribute status_attr = __ATTR(LEDMode, 0666, status, status_store);
+static struct kobj_attribute diffTime_attr = __ATTR(LEDMode, 0666, diffTime_show, diffTime_store);
+
 
 /** The ebb_attrs[] is an array of attributes that is used to create the attribute group below.
  *  The attr property of the kobj_attribute is used to extract the attribute struct
@@ -158,6 +165,8 @@ static struct attribute *ebb_attrs[] = {
    &period_attr.attr,                       // The period at which the LED flashes
    &mode_attr.attr,                         // Is the LED on or off?
    &burst_attr.attr,                         // Burst the LEDs?
+   &status_attr.attr,                         // Burst the LEDs?
+   &diffTime_attr.attr,                         // Burst the LEDs?
    NULL,
 };
 
@@ -178,6 +187,9 @@ static struct task_struct *task;            /// The pointer to the thread task
  * Functions definitions
 */
 
+/// Function prototype for the custom IRQ handler function -- see below for the implementation
+static irq_handler_t  ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs);
+
 /** @brief The LED Flasher main kthread loop
  *
  *  @param arg A void pointer used in order to pass data to the thread
@@ -189,7 +201,7 @@ static int flash(void *arg){
       set_current_state(TASK_RUNNING);
       if (LEDMode==BURST){
          int tmp = burstRep;
-         while(tmp!=0){
+         while(tmp>0){
             gpio_set_value(gpioLED1, true);       // Use the LED state to light/turn on the LED
             gpio_set_value(gpioLED1, false);       // Use the LED state to light/turn of the LED
             set_current_state(TASK_RUNNING);
@@ -270,8 +282,18 @@ static int __init ebbLED_init(void){
    gpio_export(gpioLED3, false);  // causes gpio49 to appear in /sys/class/gpio
                                  // the second argument prevents the direction from being changed
 
+   gpio_request(gpioButton, "sysfs");       // Set up the gpioButton
+   gpio_direction_input(gpioButton);        // Set the button GPIO to be an input
+   gpio_set_debounce(gpioButton, 200);      // Debounce the button with a delay of 200ms
+   gpio_export(gpioButton, false);          // Causes gpio115 to appear in /sys/class/gpio
 
-   task = kthread_run(flash, NULL, "LED_flash_thread");  // Start the LED flashing thread
+   // This next call requests an interrupt line
+   result = request_irq(irqNumber,             // The interrupt number requested
+                        (irq_handler_t) ebbgpio_irq_handler, // The pointer to the handler function below
+                        IRQF_TRIGGER_RISING,   // Interrupt on rising edge (button press, not release)
+                        "ebb_gpio_handler",    // Used in /proc/interrupts to identify the owner
+                        NULL);                 // The *dev_id for shared interrupt lines, NULL is okay
+
    if(IS_ERR(task)){                                     // Kthread name is LED_flash_thread
       printk(KERN_ALERT "EBB LED: failed to create the task\n");
       return PTR_ERR(task);
@@ -300,6 +322,29 @@ static void __exit ebbLED_exit(void){
 
 
    printk(KERN_INFO "EBB LED: Goodbye from the EBB LED LKM!\n");
+}
+
+
+** @brief The GPIO IRQ Handler function
+ *  This function is a custom interrupt handler that is attached to the GPIO above. The same interrupt
+ *  handler cannot be invoked concurrently as the interrupt line is masked out until the function is complete.
+ *  This function is static as it should not be invoked directly from outside of this file.
+ *  @param irq    the IRQ number that is associated with the GPIO -- useful for logging.
+ *  @param dev_id the *dev_id that is provided -- can be used to identify which device caused the interrupt
+ *  Not used in this example as NULL is passed.
+ *  @param regs   h/w specific register values -- only really ever used for debugging.
+ *  return returns IRQ_HANDLED if successful -- should return IRQ_NONE otherwise.
+ */
+static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
+
+   task = kthread_run(buttonInterruption, NULL, "LED_flash_thread");  // Start the LED flashing thread
+
+   numberPresses++;                         // Global counter, will be outputted when the module is unloaded
+   return (irq_handler_t) IRQ_HANDLED;      // Announce that the IRQ has been handled correctly
+}
+
+static void buttonInterruption(void){
+   task = kthread_run(flash, NULL, "LED_flash_thread");  // Start the LED flashing thread
 }
 
 /// This next calls are  mandatory -- they identify the initialization function
