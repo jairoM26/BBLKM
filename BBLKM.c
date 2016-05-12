@@ -1,12 +1,14 @@
 
 /**
- * @file LinuxKernelModuleReverse.c
- * @author jairoM26
- * @author CritianMQ
- * @date 2-05-2016
- * @brief This is LKM implemented to control leds in a beagleboard with a button
- * The LKM is based on this article http://derekmolloy.ie/kernel-gpio-programming-buttons-and-leds/ 
-
+ * @file   BBLKM.c
+ * @author Jairo Mendez and Cristian Castillo
+ * @date   12 May 2016
+ * @brief  A kernel module for controlling a button (or any signal) that is connected to
+ * a GPIO. It has full support for interrupts and for sysfs entries so that an interface
+ * can be created to the button or the button can be configured from Linux userspace.
+ * The sysfs entry appears at /sys/dev
+ * @see http://www.derekmolloy.ie/ for reference
+*/
 */
 
 /**
@@ -22,12 +24,12 @@ Including libraries
 #include <linux/kobject.h>        // Using kobjects for the sysfs bindings
 #include <linux/kthread.h>        // Using kthreads for the flashing functionality
 #include <linux/delay.h>          // Using this header for the msleep() function
+#include <linux/interrupt.h>  // Required for the IRQ code
+#include <linux/time.h>       // Using the clock to measure time between button presses
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/**
- * Macros - alyas definitions
-*/
 
 MODULE_LICENSE("GPL");              ///< The license type -- this affects runtime behavior
 MODULE_AUTHOR("jairoM26 and Cristian");      ///< The author -- visible when you use modinfo
@@ -38,51 +40,59 @@ MODULE_VERSION("1.0");              ///< The version of the module
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /** Message macros */
-#define LKM_INITIALIZATION "BBLKM:  %s LKM initialization\n" 
-#define LKM_ENDED "BBLKM: CLOSING %s the LKM\n"
-#define LKM_FILE_REGISTER_MAJOR_NUMBER "BBLKM failed to register a major number\n"
-#define LKM_REGISTER_MAJOR_NUMBER_CORRECTLY "BBLKM registered correctly with major number %d\n"
-#define LKM_FILE_REGISTER_DEVICE_CLASS "Failed to register device class\n"
-#define LKM_DEVICE_CLASS_REGISTERED_CORRECTLY "BBLKM: device class registered correctly\n"
-#define LKM_FAILED_IN_CREATED_THE_DEVICE "Failed to create the device\n"
-#define LKM_CREATE_DEVICE_CORRECTLY "BLKM device class created correctly\n"
-#define LKM_OPENED_DEVICE "BBLKM: Device has been opened %d time(s)\n"
-#define LKM_SENT_DATA_TO_USER "BBLKM: Sent %d characters to the user\n"
-#define LKM_FAILED_SENDING_DATA_TO_USER "BBLKM: Failed to send %d characters to the user\n"
-#define LKM_RECIEVE_DATA_FROM_USER "BBLKM: Received %d characters from the user\n"
-#define LKM_CLOSED_DEVICE_SUCCESSFULLY "BBLKM: Device successfully closed\n"
+
+#define  DEBOUNCE_TIME 200    ///< The default bounce time -- 200ms
+#define RISING_DESCRIPTION " Rising edge = 1 (default), Falling edge = 0" // Rising param description
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* 
  * Global variables are declared as static, so are global within the file. 
  */
-static unsigned int gpioLED1 = 139;           ///< Default GPIO for the LED is 139
-module_param(gpioLED1, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(gpioLED1, " GPIO LED number (default=139)");     ///< parameter description
-static unsigned int gpioLED2 = 137;           ///< Default GPIO for the LED is 137
-module_param(gpioLED2, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(gpioLED2, " GPIO LED number (default=138)");     ///< parameter description
-static unsigned int gpioLED3 = 138;           ///< Default GPIO for the LED is 138
-module_param(gpioLED3, uint, S_IRUGO);       ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(gpioLED3, " GPIO LED number (default=137)");     ///< parameter description
 
+/**
+ * @brief Rising edge is the default IRQ property
+ * var #1
+*/
+static bool isRising = 1;
+module_param(isRising, bool, S_IRUGO);      ///< Param desc. S_IRUGO can be read/not changed
+MODULE_PARM_DESC(isRising, RISING_DESCRIPTION); 
+
+/**
+ *@brief Set the value of the gpio, in the beagleboard the pin number is 3
+*/
+static unsigned int gpioLED1 = 139;           ///< Default GPIO for the LED is 139
+
+/**
+ *@brief Set the value of the gpio, in the beagleboard the pin number is 5
+*/
+static unsigned int gpioLED2 = 138;           ///< Default GPIO for the LED is 1378
+
+/**
+ *@brief Set the value of the gpio, in the beagleboard the pin number is 7
+*/
+static unsigned int gpioLED3 = 137;           ///< Default GPIO for the LED is 137
+
+/**
+ *@brief Set the value of the gpio, in the beagleboard the pin number is 9
+*/
 static unsigned int gpioButton = 136;   ///< hard coding the button gpio for this example to P9_9 (GPIO136)
+
 static unsigned int irqNumber;          ///< Used to share the IRQ number within this file
 static unsigned int numberPresses = 0;  ///< For information, store the number of button presses
 
+static int    irqNumber;                    ///< Used to share the IRQ number within this file
+static int    numberPresses = 0;            ///< For information, store the number of button presses
+static bool   isDebounce = 1;               ///< Use to store the debounce state (on by default)
+static struct timespec ts_last, ts_current, ts_diff;  ///< timespecs from linux/time.h (has nano precision)
 static unsigned int burstRep = 1;     ///< The blink period in ms
-module_param(burstRep, uint, S_IRUGO);   ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(burstRep, " Burst is repite n times");
-
 static unsigned int blinkPeriod = 1000;     ///< The blink period in ms
-module_param(blinkPeriod, uint, S_IRUGO);   ///< Param desc. S_IRUGO can be read/not changed
-MODULE_PARM_DESC(blinkPeriod, " LED blink period in ms (min=1, default=1000, max=10000)");
-
-static char ledName[7] = "ledXXX";          ///< Null terminated default string -- just in case
 static bool ledOn = 0;                      ///< Is the LED on or off? Used for flashing
 enum modes { DEFAULT, ON, BURST };              ///< The available LED modes -- static not useful here
 static enum modes LEDMode = DEFAULT;             ///< Default mode is flashing
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /** @brief A callback function to display the LED mode
  *  @param kobj represents a kernel object device that appears in the sysfs filesystem
@@ -117,9 +127,7 @@ static ssize_t period_show(struct kobject *kobj, struct kobj_attribute *attr, ch
 static ssize_t period_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count){
    unsigned int period;                     // Using a variable to validate the data sent
    sscanf(buf, "%du", &period);             // Read in the period as an unsigned int
-   if ((period>1)&&(period<=10000)){        // Must be 2ms or greater, 10secs or less
-      blinkPeriod = period;                 // Within range, assign to blinkPeriod variable
-   }
+   blinkPeriod = period;                 // Within range, assign to blinkPeriod variable
    return period;
 }
 
@@ -132,12 +140,70 @@ static ssize_t burstRep_show(struct kobject *kobj, struct kobj_attribute *attr, 
 static ssize_t burstRep_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count){
    unsigned int n;                     // Using a variable to validate the data sent
    sscanf(buf, "%du", &n);             // Read in the repite as an unsigned int
-
    burstRep = n;                 // assign to burstRep variable
    
    return n;
 }
 
+/** @brief A callback function to output the numberPresses variable
+ *  @param kobj represents a kernel object device that appears in the sysfs filesystem
+ *  @param attr the pointer to the kobj_attribute struct
+ *  @param buf the buffer to which to write the number of presses
+ *  @return return the total number of characters written to the buffer (excluding null)
+ */
+static ssize_t numberPresses_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf){
+   return sprintf(buf, "%d\n", numberPresses);
+}
+
+
+/** @brief A callback function to read in the numberPresses variable
+ *  @param kobj represents a kernel object device that appears in the sysfs filesystem
+ *  @param attr the pointer to the kobj_attribute struct
+ *  @param buf the buffer from which to read the number of presses (e.g., reset to 0).
+ *  @param count the number characters in the buffer
+ *  @return return should return the total number of characters used from the buffer
+ */
+static ssize_t numberPresses_store(struct kobject *kobj, struct kobj_attribute *attr,
+                                   const char *buf, size_t count){
+   sscanf(buf, "%du", &numberPresses);
+   return count;
+}
+
+/** @brief Displays if the LED is on or off */
+static ssize_t ledOn_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf){
+   return sprintf(buf, "%d\n", ledOn);
+}
+
+/** @brief Displays the last time the button was pressed -- manually output the date (no localization) */
+static ssize_t lastTime_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf){
+   return sprintf(buf, "%.2lu:%.2lu:%.2lu:%.9lu \n", (ts_last.tv_sec/3600)%24,
+          (ts_last.tv_sec/60) % 60, ts_last.tv_sec % 60, ts_last.tv_nsec );
+}
+
+/** @brief Display the time difference in the form secs.nanosecs to 9 places */
+static ssize_t diffTime_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf){
+   return sprintf(buf, "%lu.%.9lu\n", ts_diff.tv_sec, ts_diff.tv_nsec);
+}
+
+/** @brief Displays if button debouncing is on or off */
+static ssize_t isDebounce_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf){
+   return sprintf(buf, "%d\n", isDebounce);
+}
+
+/** @brief Stores and sets the debounce state */
+static ssize_t isDebounce_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count){
+   unsigned int temp;
+   sscanf(buf, "%du", &temp);                // use a temp varable for correct int->bool
+   gpio_set_debounce(gpioButton,0);
+   isDebounce = temp;
+   if(isDebounce) { gpio_set_debounce(gpioButton, DEBOUNCE_TIME);
+      printk(KERN_INFO "BBLKM Button: Debounce on\n");
+   }
+   else { gpio_set_debounce(gpioButton, 0);  // set the debounce time to 0
+      printk(KERN_INFO "BBLKM Button: Debounce off\n");
+   }
+   return count;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -151,22 +217,41 @@ static ssize_t burstRep_store(struct kobject *kobj, struct kobj_attribute *attr,
  *  The period variable is associated with the blinkPeriod variable and it is to be exposed
  *  with mode 0666 using the period_show and period_store functions above
  */
+
+/**  Use these helper macros to define the name and access levels of the kobj_attributes
+ *  The kobj_attribute has an attribute attr (name and mode), show and store function pointers
+ *  The count variable is associated with the numberPresses variable and it is to be exposed
+ *  with mode 0666 using the numberPresses_show and numberPresses_store functions above
+ */
 static struct kobj_attribute period_attr = __ATTR(blinkPeriod, 0666, period_show, period_store);
 static struct kobj_attribute burst_attr = __ATTR(burstRep, 0666, burstRep_show, burstRep_store);
 static struct kobj_attribute mode_attr = __ATTR(LEDMode, 0666, mode_show, mode_store);
-static struct kobj_attribute status_attr = __ATTR(LEDMode, 0666, status, status_store);
-static struct kobj_attribute diffTime_attr = __ATTR(LEDMode, 0666, diffTime_show, diffTime_store);
+static struct kobj_attribute count_attr = __ATTR(numberPresses, 0666, numberPresses_show, numberPresses_store);
+static struct kobj_attribute debounce_attr = __ATTR(isDebounce, 0666, isDebounce_show, isDebounce_store);
+
+/**  The __ATTR_RO macro defines a read-only attribute. There is no need to identify that the
+ *  function is called _show, but it must be present. __ATTR_WO can be  used for a write-only
+ *  attribute but only in Linux 3.11.x on.
+ */
+static struct kobj_attribute ledon_attr = __ATTR_RO(ledOn);     ///< the ledon kobject attr
+static struct kobj_attribute time_attr  = __ATTR_RO(lastTime);  ///< the last time pressed kobject attr
+static struct kobj_attribute diff_attr  = __ATTR_RO(diffTime);  ///< the difference in time attr
+
 
 
 /** The ebb_attrs[] is an array of attributes that is used to create the attribute group below.
  *  The attr property of the kobj_attribute is used to extract the attribute struct
  */
-static struct attribute *ebb_attrs[] = {
+static struct attribute *BBLKM_attrs[] = {
+
+   &count_attr.attr,                  ///< The number of button presses
+   &ledon_attr.attr,                  ///< Is the LED on or off?
+   &time_attr.attr,                   ///< Time of the last button press in HH:MM:SS:NNNNNNNNN
+   &diff_attr.attr,                   ///< The difference in time between the last two presses
+   &debounce_attr.attr,               ///< Is the debounce state true or false
    &period_attr.attr,                       // The period at which the LED flashes
    &mode_attr.attr,                         // Is the LED on or off?
    &burst_attr.attr,                         // Burst the LEDs?
-   &status_attr.attr,                         // Burst the LEDs?
-   &diffTime_attr.attr,                         // Burst the LEDs?
    NULL,
 };
 
@@ -175,11 +260,11 @@ static struct attribute *ebb_attrs[] = {
  *  using the custom kernel parameter that can be passed when the module is loaded.
  */
 static struct attribute_group attr_group = {
-   .name  = ledName,                        // The name is generated in ebbLED_init()
-   .attrs = ebb_attrs,                      // The attributes array defined just above
+   .name  = "ledName",                        // The name is generated in ebbLED_init()
+   .attrs = BBLKM_attrs,                      // The attributes array defined just above
 };
 
-static struct kobject *ebb_kobj;            /// The pointer to the kobject
+static struct kobject *BBLKM_kobj;            /// The pointer to the kobject
 static struct task_struct *task;            /// The pointer to the thread task
 
 
@@ -196,25 +281,32 @@ static irq_handler_t  ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct
  *  @return returns 0 if successful
  */
 static int flash(void *arg){
-   printk(KERN_INFO "EBB LED: Thread has started running \n");
    while(!kthread_should_stop()){           // Returns true when kthread_stop() is called
       set_current_state(TASK_RUNNING);
       if (LEDMode==BURST){
-         int tmp = burstRep;
-         while(tmp>0){
+         int tmp = 0;
+         if (ledOn){
+            ledOn = false;
+            gpio_set_value(gpioLED1, ledOn);       // Use the LED state to light/turn on the LED
+            gpio_set_value(gpioLED2, ledOn);       // Use the LED state to light/turn on the LED
+            gpio_set_value(gpioLED3, ledOn);       // Use the LED state to light/turn on the LED
+            set_current_state(TASK_RUNNING);
+         }
+         while(tmp != burstRep){
             gpio_set_value(gpioLED1, true);       // Use the LED state to light/turn on the LED
+            set_current_state(TASK_RUNNING);
+            msleep(blinkPeriod);
             gpio_set_value(gpioLED1, false);       // Use the LED state to light/turn of the LED
-            set_current_state(TASK_RUNNING);
-            msleep(blinkPeriod);
             gpio_set_value(gpioLED2, true);       // Use the LED state to light/turn on the LED
-            gpio_set_value(gpioLED2, false);       // Use the LED state to light/turn of the LED
             set_current_state(TASK_RUNNING);
             msleep(blinkPeriod);
+            gpio_set_value(gpioLED2, false);       // Use the LED state to light/turn of the LED
             gpio_set_value(gpioLED3, true);       // Use the LED state to light/turn on the LED
+            set_current_state(TASK_RUNNING);
+            msleep(blinkPeriod);
             gpio_set_value(gpioLED3, false);       // Use the LED state to light/turn of the LED
             set_current_state(TASK_RUNNING);
-            printk(KERN_INFO tmp);
-            tmp = tmp - 1;
+            tmp++;
          }
       }
       else if (LEDMode==ON){
@@ -234,7 +326,11 @@ static int flash(void *arg){
       set_current_state(TASK_RUNNING);
       msleep(blinkPeriod/2);                // millisecond sleep for half of the period
    }
-   printk(KERN_INFO "EBB LED: Thread has run to completion \n");
+   getnstimeofday(&ts_current);         // Get the current time as ts_current
+   ts_diff = timespec_sub(ts_current, ts_last);   // Determine the time difference between last 2 presses
+   ts_last = ts_current;                // Store the current time as the last time ts_last
+   printk(KERN_INFO "EBB Button: The button state is currently: %d\n", gpio_get_value(gpioButton));
+   numberPresses++;                     // Global counter, will be outputted when the module is unloaded
    return 0;
 }
 
@@ -245,26 +341,33 @@ static int flash(void *arg){
  *  function sets up the GPIOs and the IRQ
  *  @return returns 0 if successful
  */
-static int __init ebbLED_init(void){
+static int __init BBLKM_init(void){
    int result = 0;
+   unsigned long IRQflags = IRQF_TRIGGER_RISING;      // The default is a rising-edge interrupt
 
-   printk(KERN_INFO "EBB LED: Initializing the EBB LED LKM\n");
-   sprintf(ledName, "led%d", gpioLED1);      // Create the gpio115 name for /sys/ebb/led49
-   sprintf(ledName, "led%d", gpioLED2);      // Create the gpio115 name for /sys/ebb/led49
-   sprintf(ledName, "led%d", gpioLED3);      // Create the gpio115 name for /sys/ebb/led49
 
-   ebb_kobj = kobject_create_and_add("ebb", kernel_kobj->parent); // kernel_kobj points to /sys/kernel
-   if(!ebb_kobj){
-      printk(KERN_ALERT "EBB LED: failed to create kobject\n");
+   printk(KERN_INFO "Initializing the BBLKM\n");
+   sprintf("file", "led%d", gpioLED1);      // Create the gpio115 name for /sys/ebb/led49
+   sprintf("file", "led%d", gpioLED2);      // Create the gpio115 name for /sys/ebb/led49
+   sprintf("file", "led%d", gpioLED3);      // Create the gpio115 name for /sys/ebb/led49
+
+   BBLKM_kobj = kobject_create_and_add("BBLKM", kernel_kobj->parent); // kernel_kobj points to /sys/kernel
+   if(!BBLKM_kobj){
+      printk(KERN_ALERT "BBLKM: failed to create kobject\n");
       return -ENOMEM;
    }
-   // add the attributes to /sys/ebb/ -- for example, /sys/ebb/led49/ledOn
-   result = sysfs_create_group(ebb_kobj, &attr_group);
+   // add the attributes to /sys/ebb/ -- for example, /sys/BBLKM/led138/ledOn
+   result = sysfs_create_group(BBLKM_kobj, &attr_group);
    if(result) {
-      printk(KERN_ALERT "EBB LED: failed to create sysfs group\n");
-      kobject_put(ebb_kobj);                // clean up -- remove the kobject sysfs entry
+      printk(KERN_ALERT "BBLKM: failed to create sysfs group\n");
+      kobject_put(BBLKM_kobj);                // clean up -- remove the kobject sysfs entry
       return result;
    }
+
+   getnstimeofday(&ts_last);                          // set the last time to be the current time
+   ts_diff = timespec_sub(ts_last, ts_last);          // set the initial time difference to be 0
+
+
    ledOn = true;
    gpio_request(gpioLED1, "sysfs");          // gpioLED1 is 139 by default, request it
    gpio_direction_output(gpioLED1, ledOn);   // Set the gpio to be in output mode and turn on
@@ -284,18 +387,27 @@ static int __init ebbLED_init(void){
 
    gpio_request(gpioButton, "sysfs");       // Set up the gpioButton
    gpio_direction_input(gpioButton);        // Set the button GPIO to be an input
-   gpio_set_debounce(gpioButton, 200);      // Debounce the button with a delay of 200ms
+   gpio_set_debounce(gpioButton, DEBOUNCE_TIME); // Debounce the button with a delay of 200ms
    gpio_export(gpioButton, false);          // Causes gpio115 to appear in /sys/class/gpio
+
+    /// GPIO numbers and IRQ numbers are not the same! This function performs the mapping for us
+   irqNumber = gpio_to_irq(gpioButton);
+   printk(KERN_INFO "BBLKM button is mapped to IRQ: %d\n", irqNumber);
+
+   if(!isRising){                           // If the kernel parameter isRising=0 is supplied
+      IRQflags = IRQF_TRIGGER_FALLING;      // Set the interrupt to be on the falling edge
+   }
 
    // This next call requests an interrupt line
    result = request_irq(irqNumber,             // The interrupt number requested
-                        (irq_handler_t) ebbgpio_irq_handler, // The pointer to the handler function below
+                        (irq_handler_t) BBLKMgpio_irq_handler, // The pointer to the handler function below
                         IRQF_TRIGGER_RISING,   // Interrupt on rising edge (button press, not release)
-                        "ebb_gpio_handler",    // Used in /proc/interrupts to identify the owner
+                        "BBLKM_gpio_handler",    // Used in /proc/interrupts to identify the owner
                         NULL);                 // The *dev_id for shared interrupt lines, NULL is okay
-
+   
+  
    if(IS_ERR(task)){                                     // Kthread name is LED_flash_thread
-      printk(KERN_ALERT "EBB LED: failed to create the task\n");
+      printk(KERN_ALERT "BBLKM: failed to create the task\n");
       return PTR_ERR(task);
    }
    return result;
@@ -305,9 +417,10 @@ static int __init ebbLED_init(void){
  *  Similar to the initialization function, it is static. The __exit macro notifies that if this
  *  code is used for a built-in driver (not a LKM) that this function is not required.
  */
-static void __exit ebbLED_exit(void){
+static void __exit BBLKM_exit(void){
    kthread_stop(task);                      // Stop the LED flashing thread
-   kobject_put(ebb_kobj);                   // clean up -- remove the kobject sysfs entry
+   kobject_put(BBLKM_kobj);                   // clean up -- remove the kobject sysfs entry
+
    gpio_set_value(gpioLED1, 0);              // Turn the LED1 off, indicates device was unloaded
    gpio_unexport(gpioLED1);                  // Unexport the Button GPIO
    gpio_free(gpioLED1);                      // Free the LED1 GPIO
@@ -321,11 +434,11 @@ static void __exit ebbLED_exit(void){
    gpio_free(gpioLED3);                      // Free the LED3 GPIO
 
 
-   printk(KERN_INFO "EBB LED: Goodbye from the EBB LED LKM!\n");
+   printk(KERN_INFO "Goodbye from the BBLKM!\n");
 }
 
 
-** @brief The GPIO IRQ Handler function
+/** @brief The GPIO IRQ Handler function
  *  This function is a custom interrupt handler that is attached to the GPIO above. The same interrupt
  *  handler cannot be invoked concurrently as the interrupt line is masked out until the function is complete.
  *  This function is static as it should not be invoked directly from outside of this file.
@@ -335,7 +448,7 @@ static void __exit ebbLED_exit(void){
  *  @param regs   h/w specific register values -- only really ever used for debugging.
  *  return returns IRQ_HANDLED if successful -- should return IRQ_NONE otherwise.
  */
-static irq_handler_t ebbgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
+static irq_handler_t BBLKMgpio_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs){
 
    task = kthread_run(buttonInterruption, NULL, "LED_flash_thread");  // Start the LED flashing thread
 
@@ -349,8 +462,8 @@ static void buttonInterruption(void){
 
 /// This next calls are  mandatory -- they identify the initialization function
 /// and the cleanup function (as above).
-module_init(ebbLED_init);
-module_exit(ebbLED_exit);
+module_init(BBLKM_init);
+module_exit(BBLKM_exit);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
